@@ -1,295 +1,277 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import altair as alt
 
-# =========================
-# App metadata
-# =========================
-APP_NAME = "App 3 – ET Mode (Core 80)"
-APP_VERSION = "2.2.1"
+# ----------------- App metadata -----------------
+APP_NAME = "App 3 – ET Mode (Core 80, 3 HRV profiles)"
+APP_VERSION = "2.3.0"
 
 st.set_page_config(page_title=APP_NAME, layout="wide")
 st.title(APP_NAME)
-st.caption(f"Version {APP_VERSION}")
+st.caption(f"Version: {APP_VERSION}")
 
-st.write(
-    """
-This app shows how a fixed core value (80) compresses three different HRV
-profiles into one shared dynamical pattern.
-"""
-)
-
-CORE_REF = 80.0  # fixed core value
-
-
-# =========================
-# Utility functions
-# =========================
-def parse_series(text: str):
-    """Parse comma-separated string into numpy array."""
-    try:
-        parts = [p.strip() for p in text.split(",") if p.strip() != ""]
-        values = np.array([float(p) for p in parts], dtype=float)
-        if values.size < 2:
-            return None, "Please enter at least two values for each series."
-        return values, None
-    except Exception:
-        return None, "Input must be numbers separated by commas."
+# ----------------- Utility functions -----------------
+def parse_series(text: str, default_values):
+    """Parse comma-separated string into a list of floats."""
+    if not text:
+        return default_values
+    parts = [p.strip() for p in text.split(",") if p.strip() != ""]
+    values = []
+    for p in parts:
+        try:
+            values.append(float(p))
+        except ValueError:
+            return default_values
+    if len(values) < 2:
+        return default_values
+    return values
 
 
-def step_pct_change(series: np.ndarray):
-    """Step-by-step % change; first step = 0."""
+def compute_pct_change(series):
+    """Step-by-step % change of HRV (first point = 0%)."""
     pct = [0.0]
     for i in range(1, len(series)):
-        prev, curr = series[i - 1], series[i]
+        prev = series[i - 1]
+        curr = series[i]
         if prev == 0:
             pct.append(0.0)
         else:
-            pct.append(100.0 * (curr - prev) / prev)
-    return np.array(pct, dtype=float)
+            pct.append((curr - prev) / prev * 100.0)
+    return pct
 
 
-def compute_T_and_E(pct_hrv: np.ndarray):
-    """Core-80 transform."""
-    T = pct_hrv / CORE_REF
-    E = 1.0 - T**2
-    return T, E
+def compute_T_from_pct(pct_series, core_value=80.0):
+    """Normalize %HRV to T using fixed core value (80)."""
+    return [x / core_value for x in pct_series]
 
 
-def compute_et_dev(E: np.ndarray, scale: float):
-    """Deviation from baseline, scaled for plotting."""
-    return (1.0 - E) * scale
+def compute_E_from_T(T_series):
+    """Energy-like metric from T."""
+    return [1.0 - (t ** 2) for t in T_series]
 
 
-# =========================
-# Layout – Tabs
-# =========================
-tab1, tab2 = st.tabs(["Overview – raw HRV & ET", "Detail – %HRV, T, ET"])
+def build_pct_T_E_tables(A_raw, B_raw, C_raw):
+    """From raw HRV 3 người -> bảng %HRV, T, E."""
+    A_pct = compute_pct_change(A_raw)
+    B_pct = compute_pct_change(B_raw)
+    C_pct = compute_pct_change(C_raw)
 
+    A_T = compute_T_from_pct(A_pct)
+    B_T = compute_T_from_pct(B_pct)
+    C_T = compute_T_from_pct(C_pct)
 
-# ==========================================================
-# TAB 1 – RAW HRV + ET deviation (overview)
-# ==========================================================
-with tab1:
-    st.subheader("Input – three HRV profiles (ms)")
+    A_E = compute_E_from_T(A_T)
+    B_E = compute_E_from_T(B_T)
+    C_E = compute_E_from_T(C_T)
 
-    # default examples
-    default_A = "80,78,76,75,74,60,74,75,76,78"
-    default_B = "60,58,57,56,55,45,55,56,57,58"
-    default_C = "40,39,38,37,37,30,37,37,38,39"
+    steps = list(range(1, len(A_raw) + 1))
 
-    # ET scale (room) for this tab
-    et_scale_tab1 = st.number_input(
-        "ET scale factor for plots below",
-        min_value=1.0,
-        max_value=5000.0,
-        value=300.0,
-        step=50.0,
-        key="et_scale_tab1",
+    df_pct = pd.DataFrame(
+        {"Step": steps, "A_%HRV": A_pct, "B_%HRV": B_pct, "C_%HRV": C_pct}
     )
 
-    col_a, col_b, col_c = st.columns(3)
-    with col_a:
+    df_T_E = pd.DataFrame(
+        {
+            "Step": steps,
+            "A_T": A_T,
+            "B_T": B_T,
+            "C_T": C_T,
+            "A_ET": A_E,
+            "B_ET": B_E,
+            "C_ET": C_E,
+        }
+    )
+
+    return df_pct, df_T_E
+
+
+def compute_ET_deviation(df_T_E, base_scale=1000.0):
+    """
+    Từ bảng T & E -> độ lệch ET = (1 - E) * base_scale.
+    base_scale cố định để ET luôn cùng đơn vị;
+    room sẽ do slider điều khiển trục Y.
+    """
+    A_dev = [(1.0 - e) * base_scale for e in df_T_E["A_ET"]]
+    B_dev = [(1.0 - e) * base_scale for e in df_T_E["B_ET"]]
+    C_dev = [(1.0 - e) * base_scale for e in df_T_E["C_ET"]]
+
+    steps = df_T_E["Step"].tolist()
+    df_dev = pd.DataFrame(
+        {"Step": steps, "A_ET_dev": A_dev, "B_ET_dev": B_dev, "C_ET_dev": C_dev}
+    )
+    return df_dev
+
+
+def make_et_chart(df_dev, room_value, title: str):
+    """
+    Vẽ biểu đồ ET deviation với trục Y khóa domain theo room_value.
+    room_value = “room” bạn nhập (ví dụ 300, 500, 1000).
+    """
+    df_long = df_dev.melt("Step", var_name="Profile", value_name="ET_dev")
+    chart = (
+        alt.Chart(df_long)
+        .mark_line()
+        .encode(
+            x=alt.X("Step:Q", axis=alt.Axis(title="Step")),
+            y=alt.Y(
+                "ET_dev:Q",
+                axis=alt.Axis(title=f"ET deviation (room = {room_value:g})"),
+                scale=alt.Scale(domain=[0, room_value]),
+            ),
+            color=alt.Color("Profile:N", legend=alt.Legend(title="Profile")),
+        )
+        .properties(height=260, title=title)
+    )
+    return chart
+
+
+# ----------------- Default HRV profiles -----------------
+A_default = [80, 78, 76, 75, 79, 80, 78, 76, 75, 77]
+B_default = [60, 58, 56, 55, 59, 60, 58, 56, 55, 57]
+C_default = [40, 38, 36, 35, 37, 39, 40, 38, 36, 37]
+
+# ----------------- Tabs -----------------
+tab_overview, tab_detail = st.tabs(
+    ["Overview – raw HRV & ET deviation", "Detail – %HRV, T, ET"]
+)
+
+# =========================================================
+# TAB 1 – OVERVIEW
+# =========================================================
+with tab_overview:
+    st.subheader("Overview – raw HRV and ET deviation (3 profiles)")
+
+    # Room cho biểu đồ ET overview (khóa trục Y)
+    room_overview = st.number_input(
+        "ET room for overview plot (Y-axis max)",
+        min_value=10.0,
+        max_value=20000.0,
+        value=3000.0,
+        step=50.0,
+        help="Thay đổi room để đường ET nằm cao/thấp hơn trên trục Y.",
+    )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
         text_A = st.text_area(
-            "A – high HRV",
-            value=default_A,
+            "A – high HRV (comma-separated)",
+            value=", ".join(str(x) for x in A_default),
             height=80,
-            key="tab1_A_raw",
         )
-    with col_b:
+    with col2:
         text_B = st.text_area(
-            "B – medium HRV",
-            value=default_B,
+            "B – medium HRV (comma-separated)",
+            value=", ".join(str(x) for x in B_default),
             height=80,
-            key="tab1_B_raw",
         )
-    with col_c:
+    with col3:
         text_C = st.text_area(
-            "C – low HRV",
-            value=default_C,
+            "C – low HRV (comma-separated)",
+            value=", ".join(str(x) for x in C_default),
             height=80,
-            key="tab1_C_raw",
         )
 
-    if st.button("Compute raw HRV & ET", type="primary", key="btn_tab1"):
+    if st.button("Compute raw HRV & ET (overview)"):
+        A_raw = parse_series(text_A, A_default)
+        B_raw = parse_series(text_B, B_default)
+        C_raw = parse_series(text_C, C_default)
 
-        A_raw, errA = parse_series(text_A)
-        B_raw, errB = parse_series(text_B)
-        C_raw, errC = parse_series(text_C)
+        df_pct, df_T_E = build_pct_T_E_tables(A_raw, B_raw, C_raw)
+        df_dev = compute_ET_deviation(df_T_E, base_scale=1000.0)
 
-        errors = [e for e in [errA, errB, errC] if e is not None]
-        if errors:
-            st.error(" / ".join(errors))
-        else:
-            # Align length
-            n = min(len(A_raw), len(B_raw), len(C_raw))
-            A_raw, B_raw, C_raw = A_raw[:n], B_raw[:n], C_raw[:n]
-            steps = np.arange(1, n + 1)
+        steps = df_T_E["Step"].tolist()
+        df_raw_plot = pd.DataFrame(
+            {"Step": steps, "A_raw": A_raw, "B_raw": B_raw, "C_raw": C_raw}
+        ).set_index("Step")
 
-            # %HRV
-            A_pct = step_pct_change(A_raw)
-            B_pct = step_pct_change(B_raw)
-            C_pct = step_pct_change(C_raw)
+        st.write("### Raw HRV (ms)")
+        st.line_chart(df_raw_plot)
 
-            # Core-80 transform
-            A_T, A_E = compute_T_and_E(A_pct)
-            B_T, B_E = compute_T_and_E(B_pct)
-            C_T, C_E = compute_T_and_E(C_pct)
+        st.write("### ET deviation curves (from raw %HRV)")
+        et_chart = make_et_chart(
+            df_dev, room_overview, title="ET deviation (overview)"
+        )
+        st.altair_chart(et_chart, use_container_width=True)
 
-            # Deviation (scaled)
-            A_dev = compute_et_dev(A_E, et_scale_tab1)
-            B_dev = compute_et_dev(B_E, et_scale_tab1)
-            C_dev = compute_et_dev(C_E, et_scale_tab1)
+        st.write(
+            "**Interpretation (overview):** "
+            "Raw HRV cho thấy ngưỡng khác nhau giữa A / B / C, "
+            "còn ET deviation cho thấy mức độ mỗi cơ thể rời khỏi trạng thái trung tính."
+        )
 
-            # ---------- Raw HRV plot ----------
-            st.markdown("---")
-            st.subheader("Raw HRV (ms)")
-            df_raw = pd.DataFrame(
-                {
-                    "Step": steps,
-                    "A_raw": A_raw,
-                    "B_raw": B_raw,
-                    "C_raw": C_raw,
-                }
-            ).set_index("Step")
-            st.line_chart(df_raw, height=260)
-
-            # ---------- ET deviation plot ----------
-            st.subheader(f"ET deviation curves (scaled × {et_scale_tab1:.0f})")
-            df_dev = pd.DataFrame(
-                {
-                    "Step": steps,
-                    "A_ET_dev": A_dev,
-                    "B_ET_dev": B_dev,
-                    "C_ET_dev": C_dev,
-                }
-            ).set_index("Step")
-            st.line_chart(df_dev, height=260)
-
-
-# ==========================================================
-# TAB 2 – %HRV + T + ET (detail)
-# ==========================================================
-with tab2:
+# =========================================================
+# TAB 2 – DETAIL
+# =========================================================
+with tab_detail:
     st.subheader("Detail – %HRV, T, ET (three profiles)")
 
-    default_A2 = "80,78,76,75,74,60,74,75,76,78"
-    default_B2 = "60,58,57,56,55,45,55,56,57,58"
-    default_C2 = "40,39,38,37,37,30,37,37,38,39"
-
-    # ET scale (room) for this tab
-    et_scale_tab2 = st.number_input(
-        "ET scale factor for tables & plots below",
-        min_value=1.0,
-        max_value=5000.0,
-        value=300.0,
+    room_detail = st.number_input(
+        "ET room for detailed plot (Y-axis max)",
+        min_value=10.0,
+        max_value=20000.0,
+        value=3000.0,
         step=50.0,
-        key="et_scale_tab2",
+        help="Thay đổi room để quan sát rõ hơn độ chênh ET giữa A / B / C.",
     )
 
-    col_a2, col_b2, col_c2 = st.columns(3)
-    with col_a2:
+    col1, col2, col3 = st.columns(3)
+    with col1:
         text_A2 = st.text_area(
             "A – high HRV (detail)",
-            value=default_A2,
+            value=", ".join(str(x) for x in A_default),
             height=80,
-            key="tab2_A_raw",
         )
-    with col_b2:
+    with col2:
         text_B2 = st.text_area(
             "B – medium HRV (detail)",
-            value=default_B2,
+            value=", ".join(str(x) for x in B_default),
             height=80,
-            key="tab2_B_raw",
         )
-    with col_c2:
+    with col3:
         text_C2 = st.text_area(
             "C – low HRV (detail)",
-            value=default_C2,
+            value=", ".join(str(x) for x in C_default),
             height=80,
-            key="tab2_C_raw",
         )
 
-    if st.button("Compute %HRV, T, ET", type="primary", key="btn_tab2"):
+    if st.button("Compute %HRV, T, ET"):
+        A_raw2 = parse_series(text_A2, A_default)
+        B_raw2 = parse_series(text_B2, B_default)
+        C_raw2 = parse_series(text_C2, C_default)
 
-        A_raw2, errA2 = parse_series(text_A2)
-        B_raw2, errB2 = parse_series(text_B2)
-        C_raw2, errC2 = parse_series(text_C2)
+        df_pct2, df_T_E2 = build_pct_T_E_tables(A_raw2, B_raw2, C_raw2)
+        df_dev2 = compute_ET_deviation(df_T_E2, base_scale=1000.0)
 
-        errors2 = [e for e in [errA2, errB2, errC2] if e is not None]
-        if errors2:
-            st.error(" / ".join(errors2))
-        else:
-            n2 = min(len(A_raw2), len(B_raw2), len(C_raw2))
-            A_raw2, B_raw2, C_raw2 = A_raw2[:n2], B_raw2[:n2], C_raw2[:n2]
-            steps2 = np.arange(1, n2 + 1)
+        # Tables – gọn, hiển thị song song
+        st.markdown("### Tables – step-by-step values")
+        col_tbl1, col_tbl2 = st.columns(2)
+        with col_tbl1:
+            st.markdown("**Table – %HRV**")
+            st.dataframe(df_pct2, height=220, use_container_width=True)
+        with col_tbl2:
+            st.markdown("**Table – T and ET**")
+            st.dataframe(df_T_E2, height=220, use_container_width=True)
 
-            # %HRV
-            A_pct2 = step_pct_change(A_raw2)
-            B_pct2 = step_pct_change(B_raw2)
-            C_pct2 = step_pct_change(C_raw2)
+        # Plot %HRV
+        st.markdown("### Plot – %HRV (A, B, C)")
+        df_pct_plot = df_pct2.set_index("Step")[["A_%HRV", "B_%HRV", "C_%HRV"]]
+        st.line_chart(df_pct_plot)
 
-            # Core-80 transform
-            A_T2, A_E2 = compute_T_and_E(A_pct2)
-            B_T2, B_E2 = compute_T_and_E(B_pct2)
-            C_T2, C_E2 = compute_T_and_E(C_pct2)
+        # Plot ET deviation (detail) với room cố định
+        st.markdown("### Plot – ET deviation from %HRV (room-controlled)")
+        et_chart_detail = make_et_chart(
+            df_dev2, room_detail, title="ET deviation (detail, 3 profiles)"
+        )
+        st.altair_chart(et_chart_detail, use_container_width=True)
 
-            # Deviation (scaled)
-            A_dev2 = compute_et_dev(A_E2, et_scale_tab2)
-            B_dev2 = compute_et_dev(B_E2, et_scale_tab2)
-            C_dev2 = compute_et_dev(C_E2, et_scale_tab2)
+        st.markdown(
+            """
+**Interpretation (detail):**
 
-            # ---------- Compact tables ----------
-            st.markdown("### Tables – step-by-step values")
-
-            col_t1, col_t2 = st.columns(2)
-
-            with col_t1:
-                st.markdown("**Table – %HRV**")
-                df_pct = pd.DataFrame(
-                    {
-                        "Step": steps2,
-                        "A_%HRV": A_pct2,
-                        "B_%HRV": B_pct2,
-                        "C_%HRV": C_pct2,
-                    }
-                ).set_index("Step")
-                st.dataframe(df_pct, height=160, use_container_width=True)
-
-            with col_t2:
-                st.markdown("**Table – T and ET**")
-                df_T_E = pd.DataFrame(
-                    {
-                        "Step": steps2,
-                        "A_T": A_T2,
-                        "B_T": B_T2,
-                        "C_T": C_T2,
-                        "A_ET": A_E2,
-                        "B_ET": B_E2,
-                        "C_ET": C_E2,
-                    }
-                ).set_index("Step")
-                st.dataframe(df_T_E, height=160, use_container_width=True)
-
-            # ---------- Plots ----------
-            st.markdown("### Plot – %HRV (A, B, C)")
-            df_pct_plot = pd.DataFrame(
-                {
-                    "Step": steps2,
-                    "A_%HRV": A_pct2,
-                    "B_%HRV": B_pct2,
-                    "C_%HRV": C_pct2,
-                }
-            ).set_index("Step")
-            st.line_chart(df_pct_plot, height=260)
-
-            st.markdown(f"### Plot – ET deviation (scaled × {et_scale_tab2:.0f})")
-            df_dev_plot = pd.DataFrame(
-                {
-                    "Step": steps2,
-                    "A_ET_dev": A_dev2,
-                    "B_ET_dev": B_dev2,
-                    "C_ET_dev": C_dev2,
-                }
-            ).set_index("Step")
-            st.line_chart(df_dev_plot, height=260)
+- `%HRV` vẫn phụ thuộc biên độ riêng của từng profile (A/B/C).  
+- ET deviation nén ba profile về cùng một khung động học: cùng pattern tăng/giảm,
+  khác nhau chủ yếu ở mức lệch khỏi trung tính.  
+- Room cho phép bạn phóng to/thu nhỏ độ lệch này để quan sát hoặc so sánh nhiều cá thể.
+"""
+        )
