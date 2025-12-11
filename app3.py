@@ -6,7 +6,7 @@ import numpy as np
 # App metadata
 # -------------------------
 APP_NAME = "App 3 – ET Mode (Core 80)"
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.2.1"
 
 st.set_page_config(page_title=APP_NAME, layout="wide")
 st.title(APP_NAME)
@@ -86,11 +86,11 @@ with tab1:
     col_a, col_b, col_c = st.columns(3)
 
     with col_a:
-        text_A = st.text_area("A – high HRV", value=default_A, height=80)
+        text_A = st.text_area("A – high HRV", value=default_A, height=80, key="A_raw")
     with col_b:
-        text_B = st.text_area("B – medium HRV", value=default_B, height=80)
+        text_B = st.text_area("B – medium HRV", value=default_B, height=80, key="B_raw")
     with col_c:
-        text_C = st.text_area("C – low HRV", value=default_C, height=80)
+        text_C = st.text_area("C – low HRV", value=default_C, height=80, key="C_raw")
 
     if st.button("Compute raw HRV & ET", type="primary", key="btn_tab1"):
         A_raw, errA = parse_series(text_A)
@@ -155,7 +155,7 @@ with tab1:
                 """
 **Interpretation (overview)**  
 * The three raw HRV profiles are very different in absolute value.  
-* After the Core-80 transform, all three ET-deviation curves follow almost the
+* After the transform, all three ET-deviation curves follow almost the
   same pattern: spikes and recoveries are aligned, amplitude differs only slightly.
 """
             )
@@ -172,12 +172,19 @@ with tab2:
 
     col_a2, col_b2, col_c2 = st.columns(3)
 
+    # IMPORTANT: different keys so Streamlit không coi là trùng
     with col_a2:
-        text_A2 = st.text_area("A – high HRV", value=default_A2, height=80)
+        text_A2 = st.text_area(
+            "A – high HRV (detail)", value=default_A2, height=80, key="A_detail"
+        )
     with col_b2:
-        text_B2 = st.text_area("B – medium HRV", value=default_B2, height=80)
+        text_B2 = st.text_area(
+            "B – medium HRV (detail)", value=default_B2, height=80, key="B_detail"
+        )
     with col_c2:
-        text_C2 = st.text_area("C – low HRV", value=default_C2, height=80)
+        text_C2 = st.text_area(
+            "C – low HRV (detail)", value=default_C2, height=80, key="C_detail"
+        )
 
     if st.button("Compute %HRV, T, ET", type="primary", key="btn_tab2"):
         A_raw2, errA2 = parse_series(text_A2)
