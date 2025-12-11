@@ -1,13 +1,12 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 
 # -------------------------
 # App metadata
 # -------------------------
 APP_NAME = "App 3 – ET Mode (Core 80)"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 
 st.set_page_config(page_title=APP_NAME, layout="wide")
 st.title(APP_NAME)
@@ -15,8 +14,8 @@ st.caption(f"Version {APP_VERSION}")
 
 st.write(
     """
-This app shows how the Core-80 transform compresses three different HRV profiles
-(high / medium / low) into one common dynamical pattern.
+This app shows how the Core-80 transform compresses three different HRV
+profiles (high / medium / low) into one common dynamical pattern.
 """
 )
 
@@ -33,7 +32,7 @@ def parse_series(text: str):
         parts = [p.strip() for p in text.split(",") if p.strip() != ""]
         values = np.array([float(p) for p in parts], dtype=float)
         if values.size < 2:
-            return None, "Please enter at least two values."
+            return None, "Please enter at least two values for each series."
         return values, None
     except Exception:
         return None, "Input must be numbers separated by commas."
@@ -68,12 +67,15 @@ def compute_et_dev(E: np.ndarray):
 
 
 # -------------------------
-# Layout – inputs
+# Layout – tabs
 # -------------------------
 tab1, tab2 = st.tabs(
     ["Overview – raw HRV & ET", "Detail – %HRV, T, ET (3 profiles)"]
 )
 
+# ===========================================================
+# TAB 1 – raw HRV + ET deviation (overview)
+# ===========================================================
 with tab1:
     st.subheader("Input – three HRV profiles (ms)")
 
@@ -90,7 +92,7 @@ with tab1:
     with col_c:
         text_C = st.text_area("C – low HRV", value=default_C, height=80)
 
-    if st.button("Compute raw HRV & ET", type="primary"):
+    if st.button("Compute raw HRV & ET", type="primary", key="btn_tab1"):
         A_raw, errA = parse_series(text_A)
         B_raw, errB = parse_series(text_B)
         C_raw, errC = parse_series(text_C)
@@ -120,40 +122,49 @@ with tab1:
             B_dev = compute_et_dev(B_E)
             C_dev = compute_et_dev(C_E)
 
+            # -------- Raw HRV plot --------
             st.markdown("---")
             st.subheader("Raw HRV (ms)")
 
-            fig1, ax1 = plt.subplots()
-            ax1.plot(steps, A_raw, marker="o", label="A_raw")
-            ax1.plot(steps, B_raw, marker="o", label="B_raw")
-            ax1.plot(steps, C_raw, marker="o", label="C_raw")
-            ax1.set_xlabel("Step")
-            ax1.set_ylabel("HRV (ms)")
-            ax1.legend()
-            st.pyplot(fig1)
+            df_raw = pd.DataFrame(
+                {
+                    "Step": steps,
+                    "A_raw": A_raw,
+                    "B_raw": B_raw,
+                    "C_raw": C_raw,
+                }
+            ).set_index("Step")
 
+            st.line_chart(df_raw, height=260)
+
+            # -------- ET deviation plot --------
             st.subheader("ET deviation curves (scaled)")
 
-            fig2, ax2 = plt.subplots()
-            ax2.plot(steps, A_dev, marker="o", label="A_dev")
-            ax2.plot(steps, B_dev, marker="o", label="B_dev")
-            ax2.plot(steps, C_dev, marker="o", label="C_dev")
-            ax2.set_xlabel("Step")
-            ax2.set_ylabel("Deviation (scaled units)")
-            ax2.legend()
-            st.pyplot(fig2)
+            df_dev = pd.DataFrame(
+                {
+                    "Step": steps,
+                    "A_ET_dev": A_dev,
+                    "B_ET_dev": B_dev,
+                    "C_ET_dev": C_dev,
+                }
+            ).set_index("Step")
+
+            st.line_chart(df_dev, height=260)
 
             st.markdown(
                 """
 **Interpretation (overview)**  
 * The three raw HRV profiles are very different in absolute value.  
-* After the transform, all three ET curves follow almost the same pattern:
-  the spikes and recoveries are aligned, only the amplitude is slightly different.
+* After the Core-80 transform, all three ET-deviation curves follow almost the
+  same pattern: spikes and recoveries are aligned, amplitude differs only slightly.
 """
             )
 
+# ===========================================================
+# TAB 2 – %HRV, T, ET (detail)
+# ===========================================================
 with tab2:
-    st.subheader("Tab 2 – %HRV, T and ET (three individuals)")
+    st.subheader("Tab 2 – %HRV, T and ET (three profiles)")
 
     default_A2 = "80,78,76,75,74,60,74,75,76,78"
     default_B2 = "60,58,57,56,55,45,55,56,57,58"
@@ -197,7 +208,7 @@ with tab2:
             B_dev2 = compute_et_dev(B_E2)
             C_dev2 = compute_et_dev(C_E2)
 
-            # ---------- tables (compact) ----------
+            # ---------- tables (compact, trong expander) ----------
             with st.expander("Detailed values (%HRV, T, ET)"):
                 df_pct = pd.DataFrame(
                     {
@@ -259,34 +270,37 @@ with tab2:
             st.markdown("---")
             st.markdown("### Plot – %HRV (A, B, C)")
 
-            fig3, ax3 = plt.subplots()
-            ax3.plot(steps2, A_pct2, marker="o", label="A_%HRV")
-            ax3.plot(steps2, B_pct2, marker="o", label="B_%HRV")
-            ax3.plot(steps2, C_pct2, marker="o", label="C_%HRV")
-            ax3.set_xlabel("Step")
-            ax3.set_ylabel("%HRV (step change)")
-            ax3.axhline(0, linestyle="--", linewidth=0.8)
-            ax3.legend()
-            st.pyplot(fig3)
+            df_pct_plot = pd.DataFrame(
+                {
+                    "Step": steps2,
+                    "A_%HRV": A_pct2,
+                    "B_%HRV": B_pct2,
+                    "C_%HRV": C_pct2,
+                }
+            ).set_index("Step")
+
+            st.line_chart(df_pct_plot, height=260)
 
             st.markdown("### Plot – ET deviation from %HRV (scaled)")
 
-            fig4, ax4 = plt.subplots()
-            ax4.plot(steps2, A_dev2, marker="o", label="A_ET_dev")
-            ax4.plot(steps2, B_dev2, marker="o", label="B_ET_dev")
-            ax4.plot(steps2, C_dev2, marker="o", label="C_ET_dev")
-            ax4.set_xlabel("Step")
-            ax4.set_ylabel("Deviation (scaled units)")
-            ax4.axhline(0, linestyle="--", linewidth=0.8)
-            ax4.legend()
-            st.pyplot(fig4)
+            df_dev_plot = pd.DataFrame(
+                {
+                    "Step": steps2,
+                    "A_ET_dev": A_dev2,
+                    "B_ET_dev": B_dev2,
+                    "C_ET_dev": C_dev2,
+                }
+            ).set_index("Step")
+
+            st.line_chart(df_dev_plot, height=260)
 
             st.markdown(
                 """
 **Interpretation (detail)**  
 * %HRV lines show different amplitudes between A / B / C.  
-* After the Core-80 transform, the ET-deviation curves follow almost the
-  same pattern; the main spikes and recoveries are aligned in time.  
-* This is the key point: very different bodies → one shared dynamical pattern.
+* After the Core-80 transform, ET-deviation curves follow almost the same
+  pattern; main spikes and recoveries are aligned in time.  
+* This illustrates how different bodies can be mapped into one shared
+  dynamical pattern.
 """
             )
