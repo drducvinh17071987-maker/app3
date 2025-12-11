@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
 
 # ---------------------------------------------------------
 # App metadata
 # ---------------------------------------------------------
 APP_NAME = "App 3 – ET Mode (Core 80 from %HRV)"
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.2.0"
 
 st.set_page_config(page_title=APP_NAME, layout="wide")
 st.title(APP_NAME)
@@ -13,9 +14,9 @@ st.caption(f"Version: {APP_VERSION}")
 
 st.write(
     "This app applies the ET core-80 transformation on HRV series from three "
-    "individuals (A: high HRV, B: medium HRV, C: low HRV). "
-    "Pipeline per person:\n\n"
-    "HRV → step-by-step %HRV → T = %HRV / 80 → E = 1 − T²."
+    "individuals (A: high HRV, B: medium HRV, C: low HRV).\n\n"
+    "Pipeline per person: **HRV → step-by-step %HRV → T = %HRV/80 → E = 1 − T²**.\n"
+    "Plots are zoomed so that ET variations (≈0.995–1.000) become visible."
 )
 
 # ---------------------------------------------------------
@@ -73,6 +74,54 @@ def et_from_pct(pct_list):
     T = [x / 80.0 for x in pct_list]
     E = [1.0 - (t * t) for t in T]
     return T, E
+
+
+def plot_et_zoomed(df_et: pd.DataFrame, title: str):
+    """
+    Plot ET curves with zoomed y-axis so that tiny changes around 1.0 are visible.
+    """
+    if df_et.empty:
+        return
+
+    ymin = df_et.min().min()
+    ymax = df_et.max().max()
+
+    # If all values are identical, give a tiny margin
+    if ymax == ymin:
+        margin = 0.001
+    else:
+        margin = (ymax - ymin) * 0.5
+
+    fig, ax = plt.subplots()
+    for col in df_et.columns:
+        ax.plot(df_et.index, df_et[col], marker="o", label=col)
+
+    ax.set_xlabel("Step")
+    ax.set_ylabel("ET")
+    ax.set_title(title)
+    ax.set_ylim(ymin - margin, ymax + margin)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    st.pyplot(fig)
+
+
+def plot_line(df: pd.DataFrame, title: str, ylabel: str):
+    """
+    Generic nice-looking line plot for raw HRV and %HRV.
+    """
+    if df.empty:
+        return
+
+    fig, ax = plt.subplots()
+    for col in df.columns:
+        ax.plot(df.index, df[col], marker="o", label=col)
+
+    ax.set_xlabel("Step")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    st.pyplot(fig)
 
 
 # ---------------------------------------------------------
@@ -146,8 +195,7 @@ with tab1:
                     df_raw.index = range(1, len(df_raw) + 1)
                     df_raw.index.name = "Step"
 
-                    st.markdown("### Raw HRV (ms)")
-                    st.line_chart(df_raw, height=260)
+                    plot_line(df_raw, "Raw HRV (ms)", "HRV (ms)")
 
                     # ---------- ET from %HRV, core 80 ----------
                     pctA = compute_pct_hrv(A) if A else []
@@ -168,18 +216,17 @@ with tab1:
                     df_et.index = range(1, len(df_et) + 1)
                     df_et.index.name = "Step"
 
-                    st.markdown("### ET curves (from %HRV, core 80)")
-                    st.line_chart(df_et, height=260)
+                    plot_et_zoomed(df_et, "ET curves (from %HRV, core 80)")
 
                     st.markdown(
                         """
                         **Interpretation (overview):**
 
-                        - Raw HRV (top chart) separates A / B / C by baseline.
-                        - ET curves (bottom chart), computed from %HRV with a single constant 80,
-                          have almost identical shapes; amplitude differences become extremely small.
-                        - This shows how ET core-80 compresses different bodies into one common
-                          dynamical geometry.
+                        - Raw HRV (top) separates A / B / C by baseline.
+                        - ET curves (bottom) are plotted with a zoomed y-axis: small changes
+                          around 1.0 now become visible.
+                        - You can read stress vs recovery from **slope**:
+                          ET trending down → stress phase; ET trending up → recovery.
                         """
                     )
 
@@ -249,7 +296,7 @@ with tab2:
                     df_pct.index.name = "Step"
 
                     st.markdown("### Table – step-by-step %HRV")
-                    st.dataframe(df_pct, height=200)
+                    st.dataframe(df_pct, height=180)
 
                     # ---------- 2. T = %HRV / 80 ----------
                     TA, _ = et_from_pct(pctA) if pctA else ([], [])
@@ -266,7 +313,7 @@ with tab2:
                     df_T.index = df_pct.index
 
                     st.markdown("### Table – T values (T = %HRV / 80)")
-                    st.dataframe(df_T, height=200)
+                    st.dataframe(df_T, height=180)
 
                     # ---------- 3. E = 1 - T^2 ----------
                     _, EA2 = et_from_pct(pctA) if pctA else ([], [])
@@ -282,27 +329,23 @@ with tab2:
                     )
                     df_ET.index = df_pct.index
 
-                    st.markdown("### Table – ET values (E = 1 - T²)")
-                    st.dataframe(df_ET, height=200)
+                    st.markdown("### Table – ET values (E = 1 − T²)")
+                    st.dataframe(df_ET, height=180)
 
                     # ---------- Plots ----------
-                    st.markdown("### Plot – %HRV (A, B, C)")
-                    st.line_chart(df_pct, height=250)
-
-                    st.markdown("### Plot – ET curves from %HRV (core 80)")
-                    st.line_chart(df_ET, height=250)
+                    plot_line(df_pct, "Plot – %HRV (A, B, C)", "%HRV (%)")
+                    plot_et_zoomed(df_ET, "Plot – ET curves from %HRV (core 80)")
 
                     st.markdown(
                         """
                         **Interpretation (detail):**
 
-                        - %HRV table shows different amplitudes for A / B / C.
-                        - T = %HRV / 80 puts all three into the same normalized Lorentz input range.
-                        - ET = 1 − T² compresses these differences even further: the ET curves are
-                          almost indistinguishable between A, B and C.
-                        - The same code can be applied to any other individuals: as long as you
-                          provide HRV time series, the app computes %HRV, T and ET in exactly the
-                          same way.
+                        - %HRV shows different amplitudes for A / B / C.
+                        - T = %HRV / 80 puts all three into the same Lorentz input range.
+                        - ET = 1 − T² compresses these differences even further: with zoomed scale
+                          you can still see the same up/down pattern for all three profiles.
+                        - For stress vs recovery, look at **trend** (slope) of ET over steps,
+                          not the absolute level (which is always close to 1.0).
                         """
                     )
 
