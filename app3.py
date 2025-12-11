@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 
 # ---------------------------------------------------------
 # App metadata
@@ -16,7 +15,7 @@ st.write(
     "This app applies the ET core-80 transformation on HRV series from three "
     "individuals (A: high HRV, B: medium HRV, C: low HRV).\n\n"
     "Pipeline per person: **HRV → step-by-step %HRV → T = %HRV/80 → E = 1 − T²**.\n"
-    "Plots are zoomed so that ET variations (≈0.995–1.000) become visible."
+    "To make ET dynamics visible, we also plot **ET deviation = (1 − E) × 1000**."
 )
 
 # ---------------------------------------------------------
@@ -76,52 +75,13 @@ def et_from_pct(pct_list):
     return T, E
 
 
-def plot_et_zoomed(df_et: pd.DataFrame, title: str):
+def build_et_deviation(E_list):
     """
-    Plot ET curves with zoomed y-axis so that tiny changes around 1.0 are visible.
+    Build ET deviation signal so that small changes around 1.0 become visible:
+    ET_dev[i] = (1 - E[i]) * 1000
+    Units: arbitrary "stress units".
     """
-    if df_et.empty:
-        return
-
-    ymin = df_et.min().min()
-    ymax = df_et.max().max()
-
-    # If all values are identical, give a tiny margin
-    if ymax == ymin:
-        margin = 0.001
-    else:
-        margin = (ymax - ymin) * 0.5
-
-    fig, ax = plt.subplots()
-    for col in df_et.columns:
-        ax.plot(df_et.index, df_et[col], marker="o", label=col)
-
-    ax.set_xlabel("Step")
-    ax.set_ylabel("ET")
-    ax.set_title(title)
-    ax.set_ylim(ymin - margin, ymax + margin)
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    st.pyplot(fig)
-
-
-def plot_line(df: pd.DataFrame, title: str, ylabel: str):
-    """
-    Generic nice-looking line plot for raw HRV and %HRV.
-    """
-    if df.empty:
-        return
-
-    fig, ax = plt.subplots()
-    for col in df.columns:
-        ax.plot(df.index, df[col], marker="o", label=col)
-
-    ax.set_xlabel("Step")
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    st.pyplot(fig)
+    return [(1.0 - e) * 1000.0 for e in E_list]
 
 
 # ---------------------------------------------------------
@@ -195,7 +155,8 @@ with tab1:
                     df_raw.index = range(1, len(df_raw) + 1)
                     df_raw.index.name = "Step"
 
-                    plot_line(df_raw, "Raw HRV (ms)", "HRV (ms)")
+                    st.markdown("### Raw HRV (ms)")
+                    st.line_chart(df_raw, height=260)
 
                     # ---------- ET from %HRV, core 80 ----------
                     pctA = compute_pct_hrv(A) if A else []
@@ -206,27 +167,32 @@ with tab1:
                     _, EB = et_from_pct(pctB) if pctB else ([], [])
                     _, EC = et_from_pct(pctC) if pctC else ([], [])
 
-                    df_et = pd.DataFrame(
+                    # ET deviation (zoomed version to see dynamics)
+                    A_dev = build_et_deviation(EA)
+                    B_dev = build_et_deviation(EB)
+                    C_dev = build_et_deviation(EC)
+
+                    df_et_dev = pd.DataFrame(
                         {
-                            "A_ET": EA,
-                            "B_ET": EB,
-                            "C_ET": EC,
+                            "A_ET_dev": A_dev,
+                            "B_ET_dev": B_dev,
+                            "C_ET_dev": C_dev,
                         }
                     )
-                    df_et.index = range(1, len(df_et) + 1)
-                    df_et.index.name = "Step"
+                    df_et_dev.index = range(1, len(df_et_dev) + 1)
+                    df_et_dev.index.name = "Step"
 
-                    plot_et_zoomed(df_et, "ET curves (from %HRV, core 80)")
+                    st.markdown("### ET deviation curves ( (1 − E) × 1000 )")
+                    st.line_chart(df_et_dev, height=260)
 
                     st.markdown(
                         """
                         **Interpretation (overview):**
 
                         - Raw HRV (top) separates A / B / C by baseline.
-                        - ET curves (bottom) are plotted with a zoomed y-axis: small changes
-                          around 1.0 now become visible.
-                        - You can read stress vs recovery from **slope**:
-                          ET trending down → stress phase; ET trending up → recovery.
+                        - ET deviation (bottom) shows **shape only**:
+                          the three profiles share almost the same up/down pattern.
+                        - ET deviation rising → stress is increasing; falling → recovery.
                         """
                     )
 
@@ -296,7 +262,7 @@ with tab2:
                     df_pct.index.name = "Step"
 
                     st.markdown("### Table – step-by-step %HRV")
-                    st.dataframe(df_pct, height=180)
+                    st.dataframe(df_pct, height=160)
 
                     # ---------- 2. T = %HRV / 80 ----------
                     TA, _ = et_from_pct(pctA) if pctA else ([], [])
@@ -313,7 +279,7 @@ with tab2:
                     df_T.index = df_pct.index
 
                     st.markdown("### Table – T values (T = %HRV / 80)")
-                    st.dataframe(df_T, height=180)
+                    st.dataframe(df_T, height=160)
 
                     # ---------- 3. E = 1 - T^2 ----------
                     _, EA2 = et_from_pct(pctA) if pctA else ([], [])
@@ -330,22 +296,38 @@ with tab2:
                     df_ET.index = df_pct.index
 
                     st.markdown("### Table – ET values (E = 1 − T²)")
-                    st.dataframe(df_ET, height=180)
+                    st.dataframe(df_ET, height=160)
 
-                    # ---------- Plots ----------
-                    plot_line(df_pct, "Plot – %HRV (A, B, C)", "%HRV (%)")
-                    plot_et_zoomed(df_ET, "Plot – ET curves from %HRV (core 80)")
+                    # ---------- 4. Plots ----------
+                    st.markdown("### Plot – %HRV (A, B, C)")
+                    st.line_chart(df_pct, height=220)
+
+                    A_dev2 = build_et_deviation(EA2)
+                    B_dev2 = build_et_deviation(EB2)
+                    C_dev2 = build_et_deviation(EC2)
+
+                    df_et_dev2 = pd.DataFrame(
+                        {
+                            "A_ET_dev": A_dev2,
+                            "B_ET_dev": B_dev2,
+                            "C_ET_dev": C_dev2,
+                        }
+                    )
+                    df_et_dev2.index = df_pct.index
+
+                    st.markdown("### Plot – ET deviation from %HRV ( (1 − E) × 1000 )")
+                    st.line_chart(df_et_dev2, height=220)
 
                     st.markdown(
                         """
                         **Interpretation (detail):**
 
-                        - %HRV shows different amplitudes for A / B / C.
-                        - T = %HRV / 80 puts all three into the same Lorentz input range.
-                        - ET = 1 − T² compresses these differences even further: with zoomed scale
-                          you can still see the same up/down pattern for all three profiles.
-                        - For stress vs recovery, look at **trend** (slope) of ET over steps,
-                          not the absolute level (which is always close to 1.0).
+                        - %HRV shows the raw percentage changes; amplitudes differ between A / B / C.
+                        - T = %HRV / 80 normalizes all three into the same Lorentz input space.
+                        - ET = 1 − T² is very close to 1.0, so we plot **ET deviation**:
+                          (1 − E) × 1000. This reveals the same up/down pattern for all profiles.
+                        - In practice, ET deviation rising → stronger stress loading;
+                          ET deviation falling → autonomic recovery.
                         """
                     )
 
