@@ -1,335 +1,292 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
-# ---------------------------------------------------------
+# -------------------------
 # App metadata
-# ---------------------------------------------------------
-APP_NAME = "App 3 – ET Mode (Core 80 from %HRV)"
-APP_VERSION = "2.2.0"
+# -------------------------
+APP_NAME = "App 3 – ET Mode (Core 80)"
+APP_VERSION = "2.1.0"
 
 st.set_page_config(page_title=APP_NAME, layout="wide")
 st.title(APP_NAME)
-st.caption(f"Version: {APP_VERSION}")
+st.caption(f"Version {APP_VERSION}")
 
 st.write(
-    "This app applies the ET core-80 transformation on HRV series from three "
-    "individuals (A: high HRV, B: medium HRV, C: low HRV).\n\n"
-    "Pipeline per person: **HRV → step-by-step %HRV → T = %HRV/80 → E = 1 − T²**.\n"
-    "To make ET dynamics visible, we also plot **ET deviation = (1 − E) × 1000**."
+    """
+This app shows how the Core-80 transform compresses three different HRV profiles
+(high / medium / low) into one common dynamical pattern.
+"""
 )
 
-# ---------------------------------------------------------
+CORE_REF = 80.0          # fixed reference (80)
+ET_DEV_SCALE = 300.0     # scale for (1 - E) so that curves stay close together
+
+
+# -------------------------
 # Utility functions
-# ---------------------------------------------------------
-
-def parse_hrv_input(text: str):
-    """
-    Parse '80, 78, 76' into [80.0, 78.0, 76.0].
-    """
-    if not text:
-        return []
-    items = [x.strip() for x in text.split(",")]
-    values = []
-    for x in items:
-        if x == "":
-            continue
-        try:
-            values.append(float(x))
-        except ValueError:
-            raise ValueError(f"Invalid value: '{x}' (not a number).")
-    return values
+# -------------------------
+def parse_series(text: str):
+    """Parse comma-separated HRV values into a numpy array."""
+    try:
+        parts = [p.strip() for p in text.split(",") if p.strip() != ""]
+        values = np.array([float(p) for p in parts], dtype=float)
+        if values.size < 2:
+            return None, "Please enter at least two values."
+        return values, None
+    except Exception:
+        return None, "Input must be numbers separated by commas."
 
 
-def compute_pct_hrv(hrv_list):
+def step_pct_change(series: np.ndarray):
     """
-    Compute step-by-step %HRV:
-    %HRV[i] = 100 * (HRV[i] - HRV[i-1]) / HRV[i-1]
-    First point = 0.0
+    Step-by-step %HRV:
+    first step = 0, then 100 * (x[i] - x[i-1]) / x[i-1]
     """
-    n = len(hrv_list)
-    if n == 0:
-        return []
-    if n == 1:
-        return [0.0]
-
     pct = [0.0]
-    for i in range(1, n):
-        prev = hrv_list[i - 1]
-        curr = hrv_list[i]
+    for i in range(1, len(series)):
+        prev = series[i - 1]
+        curr = series[i]
         if prev == 0:
             pct.append(0.0)
         else:
             pct.append(100.0 * (curr - prev) / prev)
-    return pct
+    return np.array(pct, dtype=float)
 
 
-def et_from_pct(pct_list):
-    """
-    ET core-80 from %HRV:
-    T[i] = %HRV[i] / 80
-    E[i] = 1 - T[i]^2
-    Returns (T_list, E_list).
-    """
-    T = [x / 80.0 for x in pct_list]
-    E = [1.0 - (t * t) for t in T]
+def compute_T_and_E(pct_hrv: np.ndarray):
+    """Core-80 transform: T from %HRV, then ET value E."""
+    T = pct_hrv / CORE_REF
+    E = 1.0 - T**2
     return T, E
 
 
-def build_et_deviation(E_list):
-    """
-    Build ET deviation signal so that small changes around 1.0 become visible:
-    ET_dev[i] = (1 - E[i]) * 1000
-    Units: arbitrary "stress units".
-    """
-    return [(1.0 - e) * 1000.0 for e in E_list]
+def compute_et_dev(E: np.ndarray):
+    """Deviation from the neutral state, scaled for plotting."""
+    return (1.0 - E) * ET_DEV_SCALE
 
 
-# ---------------------------------------------------------
-# Tabs
-# ---------------------------------------------------------
-
+# -------------------------
+# Layout – inputs
+# -------------------------
 tab1, tab2 = st.tabs(
     ["Overview – raw HRV & ET", "Detail – %HRV, T, ET (3 profiles)"]
 )
 
-# Default example series
-default_A = "80,78,76,75,77,79,80,78,76,77"
-default_B = "60,58,56,55,57,59,60,58,56,57"
-default_C = "40,38,36,35,37,39,40,38,36,37"
-
-
-# =========================================================
-# TAB 1 – OVERVIEW (RAW HRV & ET)
-# =========================================================
-
 with tab1:
-    st.subheader("Tab 1 – Raw HRV vs ET (3 individuals)")
+    st.subheader("Input – three HRV profiles (ms)")
 
-    col1, col2 = st.columns([1, 2])
+    default_A = "80,78,76,75,74,60,74,75,76,78"
+    default_B = "60,58,57,56,55,45,55,56,57,58"
+    default_C = "40,39,38,37,37,30,37,37,38,39"
 
-    with col1:
-        hrv_A_text = st.text_area(
-            "A – high HRV (comma-separated):",
-            default_A,
-            height=80,
-            key="A_hrv_tab1",
-        )
-        hrv_B_text = st.text_area(
-            "B – medium HRV:",
-            default_B,
-            height=80,
-            key="B_hrv_tab1",
-        )
-        hrv_C_text = st.text_area(
-            "C – low HRV:",
-            default_C,
-            height=80,
-            key="C_hrv_tab1",
-        )
+    col_a, col_b, col_c = st.columns(3)
 
-        st.caption("Values must be separated by commas. Example: 80, 78, 76, 75, 77...")
+    with col_a:
+        text_A = st.text_area("A – high HRV", value=default_A, height=80)
+    with col_b:
+        text_B = st.text_area("B – medium HRV", value=default_B, height=80)
+    with col_c:
+        text_C = st.text_area("C – low HRV", value=default_C, height=80)
 
-        btn_overview = st.button(
-            "Compute raw HRV & ET",
-            key="btn_overview_tab1",
-        )
+    if st.button("Compute raw HRV & ET", type="primary"):
+        A_raw, errA = parse_series(text_A)
+        B_raw, errB = parse_series(text_B)
+        C_raw, errC = parse_series(text_C)
 
-    with col2:
-        if btn_overview:
-            try:
-                A = parse_hrv_input(hrv_A_text)
-                B = parse_hrv_input(hrv_B_text)
-                C = parse_hrv_input(hrv_C_text)
+        errors = [e for e in [errA, errB, errC] if e is not None]
+        if errors:
+            st.error(" / ".join(errors))
+        else:
+            # Ensure same length
+            n = min(len(A_raw), len(B_raw), len(C_raw))
+            A_raw = A_raw[:n]
+            B_raw = B_raw[:n]
+            C_raw = C_raw[:n]
+            steps = np.arange(1, n + 1)
 
-                if not (A or B or C):
-                    st.warning("Please enter at least one HRV profile.")
-                else:
-                    # ---------- Raw HRV ----------
-                    df_raw = pd.DataFrame(
-                        {
-                            "A_raw": A,
-                            "B_raw": B,
-                            "C_raw": C,
-                        }
-                    )
-                    df_raw.index = range(1, len(df_raw) + 1)
-                    df_raw.index.name = "Step"
+            # %HRV for each
+            A_pct = step_pct_change(A_raw)
+            B_pct = step_pct_change(B_raw)
+            C_pct = step_pct_change(C_raw)
 
-                    st.markdown("### Raw HRV (ms)")
-                    st.line_chart(df_raw, height=260)
+            # T, E, ET_dev
+            A_T, A_E = compute_T_and_E(A_pct)
+            B_T, B_E = compute_T_and_E(B_pct)
+            C_T, C_E = compute_T_and_E(C_pct)
 
-                    # ---------- ET from %HRV, core 80 ----------
-                    pctA = compute_pct_hrv(A) if A else []
-                    pctB = compute_pct_hrv(B) if B else []
-                    pctC = compute_pct_hrv(C) if C else []
+            A_dev = compute_et_dev(A_E)
+            B_dev = compute_et_dev(B_E)
+            C_dev = compute_et_dev(C_E)
 
-                    _, EA = et_from_pct(pctA) if pctA else ([], [])
-                    _, EB = et_from_pct(pctB) if pctB else ([], [])
-                    _, EC = et_from_pct(pctC) if pctC else ([], [])
+            st.markdown("---")
+            st.subheader("Raw HRV (ms)")
 
-                    # ET deviation (zoomed version to see dynamics)
-                    A_dev = build_et_deviation(EA)
-                    B_dev = build_et_deviation(EB)
-                    C_dev = build_et_deviation(EC)
+            fig1, ax1 = plt.subplots()
+            ax1.plot(steps, A_raw, marker="o", label="A_raw")
+            ax1.plot(steps, B_raw, marker="o", label="B_raw")
+            ax1.plot(steps, C_raw, marker="o", label="C_raw")
+            ax1.set_xlabel("Step")
+            ax1.set_ylabel("HRV (ms)")
+            ax1.legend()
+            st.pyplot(fig1)
 
-                    df_et_dev = pd.DataFrame(
-                        {
-                            "A_ET_dev": A_dev,
-                            "B_ET_dev": B_dev,
-                            "C_ET_dev": C_dev,
-                        }
-                    )
-                    df_et_dev.index = range(1, len(df_et_dev) + 1)
-                    df_et_dev.index.name = "Step"
+            st.subheader("ET deviation curves (scaled)")
 
-                    st.markdown("### ET deviation curves ( (1 − E) × 1000 )")
-                    st.line_chart(df_et_dev, height=260)
+            fig2, ax2 = plt.subplots()
+            ax2.plot(steps, A_dev, marker="o", label="A_dev")
+            ax2.plot(steps, B_dev, marker="o", label="B_dev")
+            ax2.plot(steps, C_dev, marker="o", label="C_dev")
+            ax2.set_xlabel("Step")
+            ax2.set_ylabel("Deviation (scaled units)")
+            ax2.legend()
+            st.pyplot(fig2)
 
-                    st.markdown(
-                        """
-                        **Interpretation (overview):**
-
-                        - Raw HRV (top) separates A / B / C by baseline.
-                        - ET deviation (bottom) shows **shape only**:
-                          the three profiles share almost the same up/down pattern.
-                        - ET deviation rising → stress is increasing; falling → recovery.
-                        """
-                    )
-
-            except ValueError as e:
-                st.error(str(e))
-
-
-# =========================================================
-# TAB 2 – DETAIL (%HRV, T, ET)
-# =========================================================
+            st.markdown(
+                """
+**Interpretation (overview)**  
+* The three raw HRV profiles are very different in absolute value.  
+* After the transform, all three ET curves follow almost the same pattern:
+  the spikes and recoveries are aligned, only the amplitude is slightly different.
+"""
+            )
 
 with tab2:
-    st.subheader("Tab 2 – %HRV, T, ET tables and plots (3 individuals)")
+    st.subheader("Tab 2 – %HRV, T and ET (three individuals)")
 
-    col3, col4 = st.columns([1, 2])
+    default_A2 = "80,78,76,75,74,60,74,75,76,78"
+    default_B2 = "60,58,57,56,55,45,55,56,57,58"
+    default_C2 = "40,39,38,37,37,30,37,37,38,39"
 
-    with col3:
-        hrv_A_text2 = st.text_area(
-            "A – high HRV:",
-            default_A,
-            height=80,
-            key="A_hrv_tab2",
-        )
-        hrv_B_text2 = st.text_area(
-            "B – medium HRV:",
-            default_B,
-            height=80,
-            key="B_hrv_tab2",
-        )
-        hrv_C_text2 = st.text_area(
-            "C – low HRV:",
-            default_C,
-            height=80,
-            key="C_hrv_tab2",
-        )
+    col_a2, col_b2, col_c2 = st.columns(3)
 
-        st.caption("Same HRV inputs as Tab 1, used here to show the full ET pipeline.")
+    with col_a2:
+        text_A2 = st.text_area("A – high HRV", value=default_A2, height=80)
+    with col_b2:
+        text_B2 = st.text_area("B – medium HRV", value=default_B2, height=80)
+    with col_c2:
+        text_C2 = st.text_area("C – low HRV", value=default_C2, height=80)
 
-        btn_detail = st.button(
-            "Compute %HRV, T, ET (core 80)",
-            key="btn_detail_tab2",
-        )
+    if st.button("Compute %HRV, T, ET", type="primary", key="btn_tab2"):
+        A_raw2, errA2 = parse_series(text_A2)
+        B_raw2, errB2 = parse_series(text_B2)
+        C_raw2, errC2 = parse_series(text_C2)
 
-    with col4:
-        if btn_detail:
-            try:
-                A2 = parse_hrv_input(hrv_A_text2)
-                B2 = parse_hrv_input(hrv_B_text2)
-                C2 = parse_hrv_input(hrv_C_text2)
+        errors2 = [e for e in [errA2, errB2, errC2] if e is not None]
+        if errors2:
+            st.error(" / ".join(errors2))
+        else:
+            n2 = min(len(A_raw2), len(B_raw2), len(C_raw2))
+            A_raw2 = A_raw2[:n2]
+            B_raw2 = B_raw2[:n2]
+            C_raw2 = C_raw2[:n2]
+            steps2 = np.arange(1, n2 + 1)
 
-                if not (A2 or B2 or C2):
-                    st.warning("Please enter at least one HRV profile.")
-                else:
-                    # ---------- 1. %HRV ----------
-                    pctA = compute_pct_hrv(A2) if A2 else []
-                    pctB = compute_pct_hrv(B2) if B2 else []
-                    pctC = compute_pct_hrv(C2) if C2 else []
+            # %HRV
+            A_pct2 = step_pct_change(A_raw2)
+            B_pct2 = step_pct_change(B_raw2)
+            C_pct2 = step_pct_change(C_raw2)
 
-                    df_pct = pd.DataFrame(
-                        {
-                            "A_%HRV": pctA,
-                            "B_%HRV": pctB,
-                            "C_%HRV": pctC,
-                        }
-                    )
-                    df_pct.index = range(1, len(df_pct) + 1)
-                    df_pct.index.name = "Step"
+            # T, E, ET_dev
+            A_T2, A_E2 = compute_T_and_E(A_pct2)
+            B_T2, B_E2 = compute_T_and_E(B_pct2)
+            C_T2, C_E2 = compute_T_and_E(C_pct2)
 
-                    st.markdown("### Table – step-by-step %HRV")
-                    st.dataframe(df_pct, height=160)
+            A_dev2 = compute_et_dev(A_E2)
+            B_dev2 = compute_et_dev(B_E2)
+            C_dev2 = compute_et_dev(C_E2)
 
-                    # ---------- 2. T = %HRV / 80 ----------
-                    TA, _ = et_from_pct(pctA) if pctA else ([], [])
-                    TB, _ = et_from_pct(pctB) if pctB else ([], [])
-                    TC, _ = et_from_pct(pctC) if pctC else ([], [])
+            # ---------- tables (compact) ----------
+            with st.expander("Detailed values (%HRV, T, ET)"):
+                df_pct = pd.DataFrame(
+                    {
+                        "Step": steps2,
+                        "A_%HRV": np.round(A_pct2, 3),
+                        "B_%HRV": np.round(B_pct2, 3),
+                        "C_%HRV": np.round(C_pct2, 3),
+                    }
+                )
 
-                    df_T = pd.DataFrame(
-                        {
-                            "A_T": TA,
-                            "B_T": TB,
-                            "C_T": TC,
-                        }
-                    )
-                    df_T.index = df_pct.index
+                df_T = pd.DataFrame(
+                    {
+                        "Step": steps2,
+                        "A_T": np.round(A_T2, 5),
+                        "B_T": np.round(B_T2, 5),
+                        "C_T": np.round(C_T2, 5),
+                    }
+                )
 
-                    st.markdown("### Table – T values (T = %HRV / 80)")
-                    st.dataframe(df_T, height=160)
+                df_E = pd.DataFrame(
+                    {
+                        "Step": steps2,
+                        "A_ET": np.round(A_E2, 6),
+                        "B_ET": np.round(B_E2, 6),
+                        "C_ET": np.round(C_E2, 6),
+                    }
+                )
 
-                    # ---------- 3. E = 1 - T^2 ----------
-                    _, EA2 = et_from_pct(pctA) if pctA else ([], [])
-                    _, EB2 = et_from_pct(pctB) if pctB else ([], [])
-                    _, EC2 = et_from_pct(pctC) if pctC else ([], [])
+                c1, c2, c3 = st.columns(3)
 
-                    df_ET = pd.DataFrame(
-                        {
-                            "A_ET": EA2,
-                            "B_ET": EB2,
-                            "C_ET": EC2,
-                        }
-                    )
-                    df_ET.index = df_pct.index
-
-                    st.markdown("### Table – ET values (E = 1 − T²)")
-                    st.dataframe(df_ET, height=160)
-
-                    # ---------- 4. Plots ----------
-                    st.markdown("### Plot – %HRV (A, B, C)")
-                    st.line_chart(df_pct, height=220)
-
-                    A_dev2 = build_et_deviation(EA2)
-                    B_dev2 = build_et_deviation(EB2)
-                    C_dev2 = build_et_deviation(EC2)
-
-                    df_et_dev2 = pd.DataFrame(
-                        {
-                            "A_ET_dev": A_dev2,
-                            "B_ET_dev": B_dev2,
-                            "C_ET_dev": C_dev2,
-                        }
-                    )
-                    df_et_dev2.index = df_pct.index
-
-                    st.markdown("### Plot – ET deviation from %HRV ( (1 − E) × 1000 )")
-                    st.line_chart(df_et_dev2, height=220)
-
-                    st.markdown(
-                        """
-                        **Interpretation (detail):**
-
-                        - %HRV shows the raw percentage changes; amplitudes differ between A / B / C.
-                        - T = %HRV / 80 normalizes all three into the same Lorentz input space.
-                        - ET = 1 − T² is very close to 1.0, so we plot **ET deviation**:
-                          (1 − E) × 1000. This reveals the same up/down pattern for all profiles.
-                        - In practice, ET deviation rising → stronger stress loading;
-                          ET deviation falling → autonomic recovery.
-                        """
+                with c1:
+                    st.markdown("**Table – step-by-step %HRV**")
+                    st.dataframe(
+                        df_pct,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=220,
                     )
 
-            except ValueError as e:
-                st.error(str(e))
+                with c2:
+                    st.markdown("**Table – T values (from %HRV)**")
+                    st.dataframe(
+                        df_T,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=220,
+                    )
+
+                with c3:
+                    st.markdown("**Table – ET values**")
+                    st.dataframe(
+                        df_E,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=220,
+                    )
+
+            # ---------- plots ----------
+            st.markdown("---")
+            st.markdown("### Plot – %HRV (A, B, C)")
+
+            fig3, ax3 = plt.subplots()
+            ax3.plot(steps2, A_pct2, marker="o", label="A_%HRV")
+            ax3.plot(steps2, B_pct2, marker="o", label="B_%HRV")
+            ax3.plot(steps2, C_pct2, marker="o", label="C_%HRV")
+            ax3.set_xlabel("Step")
+            ax3.set_ylabel("%HRV (step change)")
+            ax3.axhline(0, linestyle="--", linewidth=0.8)
+            ax3.legend()
+            st.pyplot(fig3)
+
+            st.markdown("### Plot – ET deviation from %HRV (scaled)")
+
+            fig4, ax4 = plt.subplots()
+            ax4.plot(steps2, A_dev2, marker="o", label="A_ET_dev")
+            ax4.plot(steps2, B_dev2, marker="o", label="B_ET_dev")
+            ax4.plot(steps2, C_dev2, marker="o", label="C_ET_dev")
+            ax4.set_xlabel("Step")
+            ax4.set_ylabel("Deviation (scaled units)")
+            ax4.axhline(0, linestyle="--", linewidth=0.8)
+            ax4.legend()
+            st.pyplot(fig4)
+
+            st.markdown(
+                """
+**Interpretation (detail)**  
+* %HRV lines show different amplitudes between A / B / C.  
+* After the Core-80 transform, the ET-deviation curves follow almost the
+  same pattern; the main spikes and recoveries are aligned in time.  
+* This is the key point: very different bodies → one shared dynamical pattern.
+"""
+            )
