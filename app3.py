@@ -5,7 +5,7 @@ import pandas as pd
 # App metadata
 # ---------------------------------------------------------
 APP_NAME = "App 3 – ET Mode (Core 80 from %HRV)"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 
 st.set_page_config(page_title=APP_NAME, layout="wide")
 st.title(APP_NAME)
@@ -79,7 +79,9 @@ def et_from_pct(pct_list):
 # Tabs
 # ---------------------------------------------------------
 
-tab1, tab2 = st.tabs(["Overview – raw HRV & ET", "Detail – %HRV, T, ET (3 profiles)"])
+tab1, tab2 = st.tabs(
+    ["Overview – raw HRV & ET", "Detail – %HRV, T, ET (3 profiles)"]
+)
 
 # Default example series
 default_A = "80,78,76,75,77,79,80,78,76,77"
@@ -97,13 +99,31 @@ with tab1:
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        hrv_A_text = st.text_area("A – high HRV (comma-separated):", default_A, height=80)
-        hrv_B_text = st.text_area("B – medium HRV:", default_B, height=80)
-        hrv_C_text = st.text_area("C – low HRV:", default_C, height=80)
+        hrv_A_text = st.text_area(
+            "A – high HRV (comma-separated):",
+            default_A,
+            height=80,
+            key="A_hrv_tab1",
+        )
+        hrv_B_text = st.text_area(
+            "B – medium HRV:",
+            default_B,
+            height=80,
+            key="B_hrv_tab1",
+        )
+        hrv_C_text = st.text_area(
+            "C – low HRV:",
+            default_C,
+            height=80,
+            key="C_hrv_tab1",
+        )
 
         st.caption("Values must be separated by commas. Example: 80, 78, 76, 75, 77...")
 
-        btn_overview = st.button("Compute raw HRV & ET")
+        btn_overview = st.button(
+            "Compute raw HRV & ET",
+            key="btn_overview_tab1",
+        )
 
     with col2:
         if btn_overview:
@@ -116,11 +136,13 @@ with tab1:
                     st.warning("Please enter at least one HRV profile.")
                 else:
                     # ---------- Raw HRV ----------
-                    df_raw = pd.DataFrame({
-                        "A_raw": A,
-                        "B_raw": B,
-                        "C_raw": C
-                    })
+                    df_raw = pd.DataFrame(
+                        {
+                            "A_raw": A,
+                            "B_raw": B,
+                            "C_raw": C,
+                        }
+                    )
                     df_raw.index = range(1, len(df_raw) + 1)
                     df_raw.index.name = "Step"
 
@@ -136,11 +158,13 @@ with tab1:
                     _, EB = et_from_pct(pctB) if pctB else ([], [])
                     _, EC = et_from_pct(pctC) if pctC else ([], [])
 
-                    df_et = pd.DataFrame({
-                        "A_ET": EA,
-                        "B_ET": EB,
-                        "C_ET": EC
-                    })
+                    df_et = pd.DataFrame(
+                        {
+                            "A_ET": EA,
+                            "B_ET": EB,
+                            "C_ET": EC,
+                        }
+                    )
                     df_et.index = range(1, len(df_et) + 1)
                     df_et.index.name = "Step"
 
@@ -173,13 +197,31 @@ with tab2:
     col3, col4 = st.columns([1, 2])
 
     with col3:
-        hrv_A_text2 = st.text_area("A – high HRV:", default_A, height=80)
-        hrv_B_text2 = st.text_area("B – medium HRV:", default_B, height=80)
-        hrv_C_text2 = st.text_area("C – low HRV:", default_C, height=80)
+        hrv_A_text2 = st.text_area(
+            "A – high HRV:",
+            default_A,
+            height=80,
+            key="A_hrv_tab2",
+        )
+        hrv_B_text2 = st.text_area(
+            "B – medium HRV:",
+            default_B,
+            height=80,
+            key="B_hrv_tab2",
+        )
+        hrv_C_text2 = st.text_area(
+            "C – low HRV:",
+            default_C,
+            height=80,
+            key="C_hrv_tab2",
+        )
 
         st.caption("Same HRV inputs as Tab 1, used here to show the full ET pipeline.")
 
-        btn_detail = st.button("Compute %HRV, T, ET (core 80)")
+        btn_detail = st.button(
+            "Compute %HRV, T, ET (core 80)",
+            key="btn_detail_tab2",
+        )
 
     with col4:
         if btn_detail:
@@ -196,11 +238,13 @@ with tab2:
                     pctB = compute_pct_hrv(B2) if B2 else []
                     pctC = compute_pct_hrv(C2) if C2 else []
 
-                    df_pct = pd.DataFrame({
-                        "A_%HRV": pctA,
-                        "B_%HRV": pctB,
-                        "C_%HRV": pctC
-                    })
+                    df_pct = pd.DataFrame(
+                        {
+                            "A_%HRV": pctA,
+                            "B_%HRV": pctB,
+                            "C_%HRV": pctC,
+                        }
+                    )
                     df_pct.index = range(1, len(df_pct) + 1)
                     df_pct.index.name = "Step"
 
@@ -212,27 +256,30 @@ with tab2:
                     TB, _ = et_from_pct(pctB) if pctB else ([], [])
                     TC, _ = et_from_pct(pctC) if pctC else ([], [])
 
-                    df_T = pd.DataFrame({
-                        "A_T": TA,
-                        "B_T": TB,
-                        "C_T": TC
-                    })
+                    df_T = pd.DataFrame(
+                        {
+                            "A_T": TA,
+                            "B_T": TB,
+                            "C_T": TC,
+                        }
+                    )
                     df_T.index = df_pct.index
 
                     st.markdown("### Table – T values (T = %HRV / 80)")
                     st.dataframe(df_T, height=200)
 
                     # ---------- 3. E = 1 - T^2 ----------
-                    # (We recompute ET to keep code clear)
                     _, EA2 = et_from_pct(pctA) if pctA else ([], [])
                     _, EB2 = et_from_pct(pctB) if pctB else ([], [])
                     _, EC2 = et_from_pct(pctC) if pctC else ([], [])
 
-                    df_ET = pd.DataFrame({
-                        "A_ET": EA2,
-                        "B_ET": EB2,
-                        "C_ET": EC2
-                    })
+                    df_ET = pd.DataFrame(
+                        {
+                            "A_ET": EA2,
+                            "B_ET": EB2,
+                            "C_ET": EC2,
+                        }
+                    )
                     df_ET.index = df_pct.index
 
                     st.markdown("### Table – ET values (E = 1 - T²)")
