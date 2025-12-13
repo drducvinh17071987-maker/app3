@@ -8,13 +8,11 @@ import altair as alt
 st.set_page_config(page_title="DN Sentinel Kernel (No-ML)", layout="wide")
 
 # =========================
-# DESIGN CONSTANTS
+# CONSTANTS
 # =========================
-# Per-signal K (hidden, not explained in UI)
 K_HRV = 80.0
 K_VO2 = 60.0
 
-# Colors
 C_GREEN = "#00C853"
 C_YELLOW = "#FFD600"
 C_RED = "#D50000"
@@ -22,7 +20,6 @@ C_INFO = "#90A4AE"
 C_BAR_BG = "#E0E0E0"
 C_CARD_BG = "#11111108"
 
-# Drop thresholds (keep consistent across tabs to avoid future edits)
 DN_GREEN = 0.95
 DN_RED = 0.85
 
@@ -50,6 +47,9 @@ def compute_state(pct_change: float, dn_core: float, K: float):
         return "GREEN", "Stable", C_GREEN
     return "GREEN", "Stable", C_GREEN
 
+# =========================
+# SINGLE TAB RENDERER (HRV / VO2)
+# =========================
 def render_tab_single_signal(
     title: str,
     unit: str,
@@ -59,23 +59,24 @@ def render_tab_single_signal(
     default_prev: float,
     default_curr: float,
 ):
-    """
-    Renders one tab with the exact same layout as HRV version:
-    - Top: 2 inputs + CALCULATE
-    - Main: 2 columns
-        Left: cards + message + raw chart (under message)
-        Right: %change bar + DN Sentinel bar
-    - DN Sentinel (0–2) is ONE number matching the bar.
-    """
-
     st.subheader(title)
 
     # ---------- INPUTS ----------
     in1, in2 = st.columns([1, 1], gap="large")
     with in1:
-        prev = st.number_input(f"{x_title} (t-1) {unit}", value=float(default_prev), step=1.0, key=f"{key_prefix}_prev")
+        prev = st.number_input(
+            f"{x_title} (t-1) {unit}",
+            value=float(default_prev),
+            step=1.0,
+            key=f"{key_prefix}_prev"
+        )
     with in2:
-        curr = st.number_input(f"{x_title} (t) {unit}", value=float(default_curr), step=1.0, key=f"{key_prefix}_curr")
+        curr = st.number_input(
+            f"{x_title} (t) {unit}",
+            value=float(default_curr),
+            step=1.0,
+            key=f"{key_prefix}_curr"
+        )
 
     do_calc = st.button("CALCULATE", type="primary", key=f"{key_prefix}_calc")
 
@@ -86,7 +87,7 @@ def render_tab_single_signal(
     if do_calc:
         # ---------- CORE ----------
         delta = curr - prev
-        pct = 0.0 if prev == 0 else 100.0 * delta / prev  # percent change
+        pct = 0.0 if prev == 0 else 100.0 * delta / prev  # % change
 
         TT_signed = pct / k_value
         TT_abs = abs(TT_signed)
@@ -97,6 +98,9 @@ def render_tab_single_signal(
         state, msg, s_color = compute_state(pct, DN_core, k_value)
 
         # ---------- DN SENTINEL (0–2): ONE NUMBER ----------
+        # Neutral: 1.0 when INFO or no change
+        # Rise: 1 + TT_pos (clamped 0..1)
+        # Drop: DN_core (0..1)
         if state == "INFO" or pct == 0:
             DN_sentinel = 1.0
         elif pct > 0:
@@ -136,7 +140,7 @@ def render_tab_single_signal(
     left, right = st.columns([1, 1], gap="large")
 
     # =========================
-    # LEFT COLUMN
+    # LEFT COLUMN: cards + message + RAW chart under message
     # =========================
     with left:
         a, b, c = st.columns([1, 1, 1], gap="medium")
@@ -187,7 +191,7 @@ def render_tab_single_signal(
 
         st.caption("Single-signal · Time-dynamic processing · No ML · No absolute threshold shown.")
 
-        # ---- 1) RAW CHART (UNDER MESSAGE) ----
+        # ---- 1) RAW CHART (must be under message, in LEFT column) ----
         st.subheader(f"1) {x_title} raw")
         df_raw = pd.DataFrame({"Time": ["t-1", "t"], x_title: [prev, curr]})
 
@@ -196,14 +200,14 @@ def render_tab_single_signal(
             .mark_line(point=True)
             .encode(
                 x=alt.X("Time:N", sort=["t-1", "t"], title="Time"),
-                y=alt.Y(f"{x_title}:Q", title=f"{x_title} ({unit})", scale=alt.Scale(zero=False))
+                y=alt.Y(f"{x_title}:Q", title=f"{x_title} ({unit})", scale=alt.Scale(zero=False)),
             )
             .properties(height=230)
         )
         st.altair_chart(chart_raw, use_container_width=True)
 
     # =========================
-    # RIGHT COLUMN
+    # RIGHT COLUMN: %Δ bar + DN bar
     # =========================
     with right:
         # ---- 2) %Δ BAR ----
@@ -217,9 +221,12 @@ def render_tab_single_signal(
 
         bar = alt.Chart(df_pct).mark_bar(color=v_color, cornerRadius=6).encode(
             y=alt.Y("label:N", title=""),
-            x=alt.X("value:Q", title="% change",
-                    scale=alt.Scale(domain=[-100, 100]),
-                    axis=alt.Axis(format=".0f"))
+            x=alt.X(
+                "value:Q",
+                title="% change",
+                scale=alt.Scale(domain=[-100, 100]),
+                axis=alt.Axis(format=".0f"),
+            ),
         )
         zero_line = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color="#333", strokeWidth=2).encode(x="x:Q")
         txt = alt.Chart(df_pct).mark_text(
@@ -227,6 +234,7 @@ def render_tab_single_signal(
         ).encode(
             y="label:N", x="value:Q", text=alt.Text("value:Q", format="+.1f")
         )
+
         st.altair_chart((bar + zero_line + txt).properties(height=120), use_container_width=True)
 
         # ---- 3) DN SENTINEL BAR ----
@@ -241,21 +249,24 @@ def render_tab_single_signal(
         else:
             g_color = C_RED
 
+        # background bar 0..2
         bg = alt.Chart(pd.DataFrame({"x0": [0], "x1": [2], "y": ["bar"]})).mark_bar(
             color=C_BAR_BG, cornerRadius=8
         ).encode(
             x=alt.X("x0:Q", scale=alt.Scale(domain=[0, 2]), title=""),
             x2="x1:Q",
-            y=alt.Y("y:N", title="")
+            y=alt.Y("y:N", title=""),
         )
 
+        # foreground fill 0..DN
         fg = alt.Chart(pd.DataFrame({"x0": [0], "x1": [DN_sentinel], "y": ["bar"]})).mark_bar(
             color=g_color, cornerRadius=8
         ).encode(x="x0:Q", x2="x1:Q", y="y:N")
 
+        # midline at 1.0
         mid = alt.Chart(pd.DataFrame({"x": [1.0]})).mark_rule(color="#111", strokeWidth=2).encode(x="x:Q")
 
-        # thresholds reference on left side
+        # thresholds reference for DROP side
         t85 = alt.Chart(pd.DataFrame({"x": [DN_RED]})).mark_rule(
             color="#444", strokeDash=[5, 5], strokeWidth=2
         ).encode(x="x:Q")
@@ -263,15 +274,15 @@ def render_tab_single_signal(
             color="#444", strokeDash=[5, 5], strokeWidth=2
         ).encode(x="x:Q")
 
+        # value label
         val = alt.Chart(pd.DataFrame({"x": [DN_sentinel], "y": ["bar"], "t": [f"{DN_sentinel:.3f}"]})).mark_text(
             align="left", dx=8, color="#111", fontSize=16, fontWeight="bold"
         ).encode(x="x:Q", y="y:N", text="t:N")
 
-        labels_df = pd.DataFrame({
-            "x": [0.15, 1.0, 1.85],
-            "y": ["bar", "bar", "bar"],
-            "t": ["DROP", "NEUTRAL", "RECOVERY"]
-        })
+        # labels DROP/NEUTRAL/RECOVERY
+        labels_df = pd.DataFrame(
+            {"x": [0.15, 1.0, 1.85], "y": ["bar", "bar", "bar"], "t": ["DROP", "NEUTRAL", "RECOVERY"]}
+        )
         lbl = alt.Chart(labels_df).mark_text(
             dy=-22, color="#333", fontSize=11, fontWeight="bold"
         ).encode(x="x:Q", y="y:N", text="t:N")
@@ -279,62 +290,63 @@ def render_tab_single_signal(
         chart_dn = alt.layer(bg, fg, mid, t85, t95, val, lbl).properties(height=130)
         st.altair_chart(chart_dn, use_container_width=True)
 
-        st.caption("0–1: reserve contraction (DN core) · 1.0: neutral · 1–2: recovery (1 + TT⁺).")
+        st.caption("0–1: reserve contraction · 1.0: neutral · 1–2: recovery / rebound.")
 
+# =========================
+# TAB 3 – ABOUT (CLEAN IP: no 0–1, no mapping/ánh xạ)
+# =========================
 def render_about_tab():
-    st.subheader("DN Kernel (No-ML)")
+    st.subheader("DN Sentinel Kernel (No-ML)")
 
-    left, right = st.columns([1, 1], gap="large")
+    l, r = st.columns([1, 1], gap="large")
 
-    with left:
+    with l:
         st.markdown(
             """
 **What it is**
-- DN Sentinel is an always-on **deterministic** guardrail.
-- It processes **one raw signal at a time** (HRV or VO₂).
-- It uses only **two consecutive points** (t-1 → t).
-- **No training, no inference, no model, no dataset.**
-- Constant-time compute (**O(1)**), suitable for realtime.
+- DN Sentinel is an **always-on physiological guardrail**.
+- It processes **one raw signal at a time** (HRV, VO₂, …).
+- Uses only **two consecutive samples (t-1 → t)**.
+- **No training, no inference, no historical window.**
+- Deterministic and constant-time execution (**O(1)**).
 
-**What it shows**
-- **DN < 1.0**  → reserve contracting (DROP)
-- **DN = 1.0**  → neutral
-- **DN > 1.0**  → recovery / rebound (RECOVERY)
+**Multi-layer vision**
+- DN Sentinel can be applied **independently** to multiple physiological layers.
+- A **global / combined guard** can be built above this kernel.
+- This demo intentionally avoids a combined multi-signal app
+  to prevent confusion with AI/ML or learned composite models.
 
-**Key point**
-- Same kernel, reused across different signals.
-- No fusion. No composite index. One channel per tab.
+> *Same kernel. Different signals. No fusion.*
             """
         )
 
-    with right:
+    with r:
         st.markdown(
             """
-**How it works (concept)**
-
-Raw signal (single channel)
-↓
-Relative change (velocity)
-↓
-Time-normalized mapping
-↓
-DN Sentinel (0–2) + State
+**Why it is device-friendly**
+Designed for wearables / edge execution:
+- Always-on
+- Negligible CPU usage
+- Near-zero RAM footprint
+- No ML accelerator
+- Minimal power consumption
+- No dependency on cloud or datasets
 
 **Design intent**
-- DN Sentinel can run continuously,
-  and optionally trigger heavier analytics only when needed.
+DN Sentinel is **not** an AI system and **not** an analytics model.
+It is a **lightweight device-level kernel** for realtime physiological guarding,
+and can optionally trigger heavier analytics only when necessary.
             """
         )
 
 # =========================
-# APP HEADER
+# APP
 # =========================
 st.title("DN Sentinel Kernel (No-ML)")
 
 tabs = st.tabs(["HRV", "VO₂", "About"])
 
 with tabs[0]:
-    # Keep HRV tab identical structure; K=80
     render_tab_single_signal(
         title="HRV Sentinel",
         unit="ms",
@@ -346,7 +358,6 @@ with tabs[0]:
     )
 
 with tabs[1]:
-    # VO2 tab identical layout; K=60
     render_tab_single_signal(
         title="VO₂ Sentinel",
         unit="ml/kg/min",
